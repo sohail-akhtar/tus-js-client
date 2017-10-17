@@ -289,10 +289,12 @@ var defaultOptions = {
   withCredentials: false,
   uploadUrl: null,
   uploadSize: null,
+  fileOffset: 0,
   overridePatchMethod: false,
   retryDelays: null,
   extensions: {
-    concatenation: false
+    concatenation: false,
+    checksum: false
   }
 };
 
@@ -340,8 +342,11 @@ var Upload = function () {
     // The offset of the remote upload before the latest attempt was started.
     this._offsetBeforeRetry = 0;
 
-    // The offset of the remote upload before the latest attempt was started.
-    this._checkSumAlgorithm = [];
+    // The available checksum algorithms
+    this._checksumAlgorithm = null;
+
+    // server extensions
+    this._serverExtensions = [];
   }
 
   _createClass(Upload, [{
@@ -568,19 +573,26 @@ var Upload = function () {
       var _this2 = this;
 
       var xhr = (0, _request.newRequest)();
-      xhr.open("OPTION", this.options.endpoint, true);
+      xhr.open("OPTIONS", this.options.endpoint, true);
 
       xhr.onload = function () {
-        var checksum = (0, _request.resolveUrl)(_this2.options.endpoint, xhr.getResponseHeader("Tus-Checksum-Algorithm"));
-        if (checksum && checksum.length) {
-          _this2._checkSumAlgorithm = checksum.split(",");
+        var extensionHeader = xhr.getResponseHeader("Tus-Extension");
+        if (extensionHeader) {
+          _this2._serverExtensions = extensionHeader.split(",");
+        }
+
+        if (_this2.options.extensions.checksum === true && _this2._serverExtensions.indexOf("checksum") !== -1) {
+          var checksum = xhr.getResponseHeader("Tus-Checksum-Algorithm");
+          if (checksum && checksum.length) {
+            _this2._checksumAlgorithm = _this2._preferredChecksumAlgorithm(checksum.split(","));
+          }
         }
 
         _this2._createUpload();
       };
 
       xhr.onerror = function (err) {
-        _this2._emitXhrError(xhr, new Error("tus: failed to fetch checksum metadata"), err);
+        _this2._emitXhrError(xhr, new Error("tus: failed to fetch options"), err);
       };
 
       this._setupXHR(xhr);
@@ -627,8 +639,8 @@ var Upload = function () {
       this._setupXHR(xhr);
       xhr.setRequestHeader("Upload-Length", this._size);
 
-      if (this.options.extensions.concatenation) {
-        xhr.setRequestHeader("Upload-Concat", "Partial");
+      if (this.options.extensions.concatenation && this._serverExtensions.indexOf("concatenation") !== -1) {
+        xhr.setRequestHeader("Upload-Concat", "partial");
       }
 
       // Add metadata if values have been added
@@ -742,6 +754,8 @@ var Upload = function () {
         return;
       }
 
+      var that = this;
+
       var xhr = (0, _request.newRequest)();
 
       // Some browser and servers may not support the PATCH method. For those
@@ -797,7 +811,7 @@ var Upload = function () {
             return;
           }
 
-          _this5._emitProgress(start + e.loaded, _this5._size);
+          _this5._emitProgress(_this5._offset + e.loaded, _this5._size);
         };
       }
 
@@ -806,22 +820,37 @@ var Upload = function () {
       xhr.setRequestHeader("Upload-Offset", this._offset);
       xhr.setRequestHeader("Content-Type", "application/offset+octet-stream");
 
-      var start = this._offset;
-      var end = this._offset + this.options.chunkSize;
+      var start = this._offset + this.options.fileOffset;
+      var end = start + this.options.chunkSize;
 
       // The specified chunkSize may be Infinity or the calcluated end position
       // may exceed the file's size. In both cases, we limit the end position to
       // the input's total size for simpler calculations and correctness.
-      if (end === Infinity || end > this._size) {
-        end = this._size;
+      if (end === Infinity || end > this._size + this.options.fileOffset) {
+        end = this._size + this.options.fileOffset;
       }
 
-      if (this._checkSumAlgorithm.length) {
-        var hash = crypto.createHash(this._checkSumAlgorithm[0]).update(this._source.slice(start, end)).digest("hex");
-        xhr.setRequestHeader("Upload-Checksum", hash);
+      if (this._checksumAlgorithm !== null) {
+        // The slicer includes one byte too much when concatenation is enabled. That is, one byte into the next part.
+        // We therefor subtract one from the end when hashing.
+        this._source.slice(start, end - 1).pipe(crypto.createHash(this._checksumAlgorithm).setEncoding("base64")).on("finish", function () {
+          xhr.setRequestHeader("Upload-Checksum", this._checksumAlgorithm + " " + this.read());
+          xhr.send(that._source.slice(start, end));
+        });
+      } else {
+        xhr.send(this._source.slice(start, end));
       }
-
-      xhr.send(this._source.slice(start, end));
+    }
+  }, {
+    key: "_preferredChecksumAlgorithm",
+    value: function _preferredChecksumAlgorithm(algorithms) {
+      var priority = ["sha1", "md5", "crc32"];
+      for (var algo in priority) {
+        if (algorithms.indexOf(algo) !== -1) {
+          return algo;
+        }
+      }
+      return null;
     }
   }]);
 
@@ -15503,7 +15532,7 @@ module.exports={
   "_args": [
     [
       "elliptic@6.4.0",
-      "C:\\code\\tus-js-client"
+      "/Users/tobiasps/Development/tus-js-client"
     ]
   ],
   "_development": true,
@@ -15529,7 +15558,7 @@ module.exports={
   ],
   "_resolved": "https://registry.npmjs.org/elliptic/-/elliptic-6.4.0.tgz",
   "_spec": "6.4.0",
-  "_where": "C:\\code\\tus-js-client",
+  "_where": "/Users/tobiasps/Development/tus-js-client",
   "author": {
     "name": "Fedor Indutny",
     "email": "fedor@indutny.com"
