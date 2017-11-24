@@ -38,8 +38,6 @@ var Storage = _interopRequireWildcard(_storage);
 
 var _crypto = require("crypto");
 
-var crypto = _interopRequireWildcard(_crypto);
-
 function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
@@ -603,7 +601,7 @@ var Upload = function () {
       if (this._checksumAlgorithm !== null) {
         // The slicer includes one byte too much when concatenation is enabled. That is, one byte into the next part.
         // We therefor subtract one from the end when hashing.
-        this._source.slice(start, end - 1).pipe(crypto.createHash(this._checksumAlgorithm).setEncoding("base64")).on("finish", function () {
+        this._source.slice(start, end - 1).pipe((0, _crypto.createHash)(this._checksumAlgorithm).setEncoding("base64")).on("finish", function () {
           xhr.setRequestHeader("Upload-Checksum", this._checksumAlgorithm + " " + this.read());
           xhr.send(that._source.slice(start, end));
         });
