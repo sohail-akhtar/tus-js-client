@@ -52,6 +52,7 @@ var defaultOptions = {
   onChunkComplete: null,
   onSuccess: null,
   onError: null,
+  onAbort: null,
   headers: {},
   chunkSize: Infinity,
   withCredentials: false,
@@ -251,6 +252,7 @@ var Upload = function () {
         clearTimeout(this._retryTimeout);
         this._retryTimeout = null;
       }
+      this._emitAbort();
     }
   }, {
     key: "_emitXhrError",
@@ -271,6 +273,13 @@ var Upload = function () {
     value: function _emitSuccess() {
       if (typeof this.options.onSuccess === "function") {
         this.options.onSuccess();
+      }
+    }
+  }, {
+    key: "_emitAbort",
+    value: function _emitAbort() {
+      if (typeof this.options.onAbort === "function") {
+        this.options.onAbort();
       }
     }
 
