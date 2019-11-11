@@ -283,6 +283,7 @@ var defaultOptions = {
   onSuccess: null,
   onError: null,
   onAbort: null,
+  onCreated: null,
   headers: {},
   chunkSize: Infinity,
   withCredentials: false,
@@ -466,8 +467,7 @@ var Upload = function () {
       }
 
       // An upload has not started for the file yet, so we start a new one
-      this._fetchChecksumAndConcatenationCapabilities();
-      // this._createUpload();
+      this._createUpload();
     }
   }, {
     key: "abort",
@@ -510,6 +510,13 @@ var Upload = function () {
     value: function _emitAbort() {
       if (typeof this.options.onAbort === "function") {
         this.options.onAbort();
+      }
+    }
+  }, {
+    key: "_emitCreated",
+    value: function _emitCreated() {
+      if (typeof this.options.onCreated === "function") {
+        this.options.onCreated(this.url);
       }
     }
 
@@ -579,32 +586,37 @@ var Upload = function () {
     value: function _fetchChecksumAndConcatenationCapabilities() {
       var _this2 = this;
 
-      var xhr = (0, _request.newRequest)();
-      xhr.open("OPTIONS", this.options.endpoint, true);
-
-      xhr.onload = function () {
-        var extensionHeader = xhr.getResponseHeader("Tus-Extension");
-        if (extensionHeader) {
-          _this2._serverExtensions = extensionHeader.split(",");
+      return new Promise(function (resolve, reject) {
+        if (!_this2.options.extensions.concatenation && !_this2.options.extensions.checksum) {
+          return resolve();
         }
+        var xhr = (0, _request.newRequest)();
+        xhr.open("OPTIONS", _this2.options.endpoint, true);
 
-        if (_this2.options.extensions.checksum === true && _this2._serverExtensions.indexOf("checksum") !== -1) {
-          var checksum = xhr.getResponseHeader("Tus-Checksum-Algorithm");
-          if (checksum && checksum.length) {
-            _this2._checksumAlgorithm = _this2._preferredChecksumAlgorithm(checksum.split(","));
+        xhr.onload = function () {
+          var extensionHeader = xhr.getResponseHeader("Tus-Extension");
+          if (extensionHeader) {
+            _this2._serverExtensions = extensionHeader.split(",");
           }
-        }
 
-        _this2._createUpload();
-      };
+          if (_this2.options.extensions.checksum === true && _this2._serverExtensions.indexOf("checksum") !== -1) {
+            var checksum = xhr.getResponseHeader("Tus-Checksum-Algorithm");
+            if (checksum && checksum.length) {
+              _this2._checksumAlgorithm = _this2._preferredChecksumAlgorithm(checksum.split(","));
+            }
+          }
+          return resolve();
+        };
 
-      xhr.onerror = function (err) {
-        _this2._emitXhrError(xhr, new Error("tus: failed to fetch options"), err);
-      };
+        xhr.onerror = function (err) {
+          _this2._emitXhrError(xhr, new Error("tus: failed to fetch options"), err);
+          return reject(err);
+        };
 
-      this._setupXHR(xhr);
+        _this2._setupXHR(xhr);
 
-      xhr.send(null);
+        xhr.send(null);
+      });
     }
 
     /**
@@ -620,43 +632,49 @@ var Upload = function () {
     value: function _createUpload() {
       var _this3 = this;
 
-      var xhr = (0, _request.newRequest)();
-      xhr.open("POST", this.options.endpoint, true);
+      this._fetchChecksumAndConcatenationCapabilities().then(function () {
+        var xhr = (0, _request.newRequest)();
+        xhr.open("POST", _this3.options.endpoint, true);
 
-      xhr.onload = function () {
-        if (!inStatusCategory(xhr.status, 200)) {
-          _this3._emitXhrError(xhr, new Error("tus: unexpected response while creating upload"));
-          return;
+        xhr.onload = function () {
+          if (!inStatusCategory(xhr.status, 200)) {
+            _this3._emitXhrError(xhr, new Error("tus: unexpected response while creating upload"));
+            return;
+          }
+
+          _this3.url = (0, _request.resolveUrl)(_this3.options.endpoint, xhr.getResponseHeader("Location"));
+
+          if (_this3.options.resume) {
+            Storage.setItem(_this3._fingerprint, _this3.url);
+          }
+
+          _this3._emitCreated();
+
+          _this3._offset = 0;
+          _this3._startUpload();
+        };
+
+        xhr.onerror = function (err) {
+          _this3._emitXhrError(xhr, new Error("tus: failed to create upload"), err);
+        };
+
+        _this3._setupXHR(xhr);
+        xhr.setRequestHeader("Upload-Length", _this3._size);
+
+        if (_this3.options.extensions.concatenation && _this3._serverExtensions.indexOf("concatenation") !== -1) {
+          xhr.setRequestHeader("Upload-Concat", "partial");
         }
 
-        _this3.url = (0, _request.resolveUrl)(_this3.options.endpoint, xhr.getResponseHeader("Location"));
-
-        if (_this3.options.resume) {
-          Storage.setItem(_this3._fingerprint, _this3.url);
+        // Add metadata if values have been added
+        var metadata = encodeMetadata(_this3.options.metadata);
+        if (metadata !== "") {
+          xhr.setRequestHeader("Upload-Metadata", metadata);
         }
 
-        _this3._offset = 0;
-        _this3._startUpload();
-      };
-
-      xhr.onerror = function (err) {
-        _this3._emitXhrError(xhr, new Error("tus: failed to create upload"), err);
-      };
-
-      this._setupXHR(xhr);
-      xhr.setRequestHeader("Upload-Length", this._size);
-
-      if (this.options.extensions.concatenation && this._serverExtensions.indexOf("concatenation") !== -1) {
-        xhr.setRequestHeader("Upload-Concat", "partial");
-      }
-
-      // Add metadata if values have been added
-      var metadata = encodeMetadata(this.options.metadata);
-      if (metadata !== "") {
-        xhr.setRequestHeader("Upload-Metadata", metadata);
-      }
-
-      xhr.send(null);
+        xhr.send(null);
+      }, function (err) {
+        _this3._emitError(err);
+      });
     }
 
     /*
